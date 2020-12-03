@@ -20,12 +20,19 @@ Adafruit_MCP23017 mcp1; // Address 001
 bool keyStates[25];
 bool canSwitchOctave;
 bool octaveKeyHeld = true;
+unsigned long octaveMillis = 0;
+bool volumeChange = false;
+bool portamentoChange = false;
 bool breathKeyHeld = false;
 bool envelopeKeyHeld = false;
 byte currentOctave = 4;
+byte previousOctave = 4;
+unsigned int currentVolume = 240; // this will be divided by 1000 in the ESP32 code, as the maximum amplitude is 1.0
+unsigned int currentPortamento = 0;
 byte currentWaveform = 0;
 
-uint8_t bovDigitalRead(uint8_t pin) {
+
+uint8_t expDigitalRead(uint8_t pin) { // digitalRead from expansion ICs
   if (pin < 16) {
     return mcp0.digitalRead(pin);
   } else if (pin < 32) {
@@ -59,6 +66,22 @@ void serialPitchChange(int value) { // sends a message to the ESP32 to change th
 
 void serialWaveformChange(int value) { // sends a message to the ESP32 to change the current waveform
   String tempString = "[W"; // [W]aveform
+
+  tempString += String(value) + "]";
+
+  Serial1.write(tempString.c_str());
+}
+
+void serialVolumeChange(int value) { // sends a message to the ESP32 to change the volume
+  String tempString = "[V"; // [V]olume
+
+  tempString += String(value) + "]";
+
+  Serial1.write(tempString.c_str());
+}
+
+void serialPortamentoChange(int value) { // sends a message to the ESP32 to change the volume
+  String tempString = "[O"; // portament[O]
 
   tempString += String(value) + "]";
 
@@ -167,6 +190,8 @@ void setup() {
 }
 
 void loop() {
+  unsigned long currentMillis = millis();
+
   unsigned int pitchValue = analogRead(pitchAxis);
   unsigned int octaveValue = analogRead(octaveAxis);
   unsigned int modulationValue = analogRead(modulationAxis);
@@ -174,7 +199,7 @@ void loop() {
 
   if (!digitalRead(midiSwitch)) { // if the mode is set to MIDI mode
     for (int i = 0; i < 25; i++) {
-      if (bovDigitalRead(i) == LOW) {
+      if (expDigitalRead(i) == LOW) {
         if (keyStates[i] == false) {
           midiNoteOn(0, currentOctave * 12 + i, 64);
           keyStates[i] = true;
@@ -192,61 +217,121 @@ void loop() {
 
     MidiUSB.flush();
   } else { // if the mode is set to synth mode (ESP32)
-    for (int i = 0; i < 25; i++) { // handling key presses and releases here (note on/off)
-      if (bovDigitalRead(i) == LOW) {
-        if (keyStates[i] == false) {
-          serialNoteOn(currentOctave * 12 + i);
-          keyStates[i] = true;
+    if (!volumeChange && !portamentoChange) {
+      for (int i = 0; i < 25; i++) { // handling key presses and releases here (note on/off)
+        if (expDigitalRead(i) == LOW) {
+          if (keyStates[i] == false) {
+            serialNoteOn(currentOctave * 12 + i);
+            keyStates[i] = true;
+          }
+        } else {
+          if (keyStates[i] == true) {
+            serialNoteOff(currentOctave * 12 + i);
+            keyStates[i] = false;
+          }
+        }
+      }
+
+      if (pitchValue < 488 || pitchValue > 536) {
+        serialPitchChange(pitchValue - 512);
+        delay(2);
+      }
+
+      if (breathValue < 256 && !breathKeyHeld && currentWaveform > 0) {
+        currentWaveform--;
+        serialWaveformChange(currentWaveform);
+      }
+      if (breathValue > 768 && !breathKeyHeld && currentWaveform < 3) {
+        currentWaveform++;
+        serialWaveformChange(currentWaveform);
+      }
+
+      if (!digitalRead(envelopeButton) && !envelopeKeyHeld) serialSendADSR(); // ADSR and duty cycle settings will be sent only on button press to relieve the CPU from unnecessary analogRead calls
+    }
+  }
+
+  if (octaveValue < 256) { // right stick is moved to the far left
+    if (!octaveKeyHeld) { // execute this only once until the stick is moved back to the middle
+      canSwitchOctave = true;
+
+      for (int i = 0; i < 25; i++) {
+        if (keyStates[i] == true) { // if any of the note keys are held...
+          canSwitchOctave = false; // ...the device won't switch octaves
+          break;
+        }
+      }
+
+      if (canSwitchOctave && currentOctave > 0) {
+        previousOctave = currentOctave; // the currently selected octave gets saved into another variable
+        currentOctave--;
+        octaveMillis = currentMillis;
+      }
+    } else if (currentMillis - octaveMillis > 1000) { // if the octave stick is pushed to the left for more than one second
+      currentOctave = previousOctave; // the selected octave gets reverted back to the previous one
+      portamentoChange = true;
+
+      if (expDigitalRead(0) == LOW && currentPortamento >= 100) { // decreasing portamento
+        if (keyStates[0] == false) {
+          currentPortamento -= 100;
+          serialPortamentoChange(currentPortamento);
+          keyStates[0] = true;
         }
       } else {
-        if (keyStates[i] == true) {
-          serialNoteOff(currentOctave * 12 + i);
-          keyStates[i] = false;
+        if (keyStates[0] == true) keyStates[0] = false;
+      }
+
+      if (expDigitalRead(2) == LOW) { // increasing portamento
+        if (keyStates[2] == false) {
+          currentPortamento += 100;
+          serialPortamentoChange(currentPortamento);
+          keyStates[2] = true;
+        }
+      } else {
+        if (keyStates[2] == true) keyStates[2] = false;
+      }
+    }
+  } else portamentoChange = false;
+  if (octaveValue > 768) { // right stick is moved to the far right
+    if (!octaveKeyHeld) { // execute this only once until the stick is moved back to the middle
+      canSwitchOctave = true;
+
+      for (int i = 0; i < 25; i++) {
+        if (keyStates[i] == true) { // if any of the note keys are held...
+          canSwitchOctave = false; // ...the device won't switch octaves
+          break;
         }
       }
-    }
 
-    if (pitchValue < 488 || pitchValue > 536) {
-      serialPitchChange(pitchValue - 512);
-      delay(2);
-    }
+      if (canSwitchOctave && currentOctave < 7) {
+        previousOctave = currentOctave; // the currently selected octave gets saved into another variable
+        currentOctave++;
+        octaveMillis = currentMillis;
+      }
+    } else if (currentMillis - octaveMillis > 1000) { // if the octave stick is pushed to the left for more than one second
+      currentOctave = previousOctave; // the selected octave gets reverted back to the previous one
+      volumeChange = true;
 
-    if (breathValue < 256 && !breathKeyHeld && currentWaveform > 0) {
-      currentWaveform--;
-      serialWaveformChange(currentWaveform);
-    }
-    if (breathValue > 768 && !breathKeyHeld && currentWaveform < 3) {
-      currentWaveform++;
-      serialWaveformChange(currentWaveform);
-    }
+      if (expDigitalRead(0) == LOW && currentVolume >= 20) { // decreasing volume
+        if (keyStates[0] == false) {
+          currentVolume -= 20;
+          serialVolumeChange(currentVolume);
+          keyStates[0] = true;
+        }
+      } else {
+        if (keyStates[0] == true) keyStates[0] = false;
+      }
 
-    if (!digitalRead(envelopeButton) && !envelopeKeyHeld) serialSendADSR(); // ADSR settings get sent only on button press to relieve the CPU from unnecessary analogRead calls
-  }
-  
-  if (octaveValue < 256 && !octaveKeyHeld && currentOctave > 0) {
-    canSwitchOctave = true;
-
-    for (int i = 0; i < 25; i++) {
-      if (keyStates[i] == true) {
-        canSwitchOctave = false;
-        break;
+      if (expDigitalRead(2) == LOW && currentVolume < 1000) { // increasing volume
+        if (keyStates[2] == false) {
+          currentVolume += 20;
+          serialVolumeChange(currentVolume);
+          keyStates[2] = true;
+        }
+      } else {
+        if (keyStates[2] == true) keyStates[2] = false;
       }
     }
-    
-    if (canSwitchOctave) currentOctave--;
-  }
-  if (octaveValue > 768 && !octaveKeyHeld && currentOctave < 7) {
-    canSwitchOctave = true;
-
-    for (int i = 0; i < 25; i++) {
-      if (keyStates[i] == true) {
-        canSwitchOctave = false;
-        break;
-      }
-    }
-    
-    if (canSwitchOctave) currentOctave++;
-  }
+  } else volumeChange = false;
 
   octaveKeyHeld = (octaveValue < 256) || (octaveValue > 768);
   breathKeyHeld = (breathValue < 256) || (breathValue > 768);

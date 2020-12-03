@@ -8,11 +8,14 @@
 #define DEBUG
 
 oscType gWaveform = sine;
+float gVolume = 0.24; // the peak volume or amplitude of any oscillator created (maximum is 1)
 unsigned int envelopeA = 1;
 unsigned int envelopeD = 1;
 unsigned int envelopeS = 1000;
 unsigned int envelopeR = 1;
 unsigned int gDutyCycle = 1023; // only relevant for the square waveform
+unsigned int gPortamento = 1; // the amount of portamento
+unsigned int lastNote = 10; // needed to be known to have portamento
 
 
 TaskHandle_t mixerHandle;
@@ -95,7 +98,8 @@ void loop() {
         if (inputString[1] == 'N') { // note on command
             uint8_t inNote = inputString.substring(2, inputString.length()).toInt();
 
-            masterMix.oscillators.push_back(new Oscillator(gWaveform, inNote, midiFrequencies[inNote], gDutyCycle, 0.25, envelopeA, envelopeD, (float)(envelopeS) / (float)(1000), envelopeR));
+            masterMix.oscillators.push_back(new Oscillator(gWaveform, inNote, midiFrequencies[inNote], gDutyCycle, gVolume, envelopeA, envelopeD, (float)(envelopeS) / (float)(1000), envelopeR, lastNote, gPortamento));
+            lastNote = inNote; // this note will be the portamento note for the next one
         } else if (inputString[1] == 'F') { // note off command
             uint8_t inNote = inputString.substring(2, inputString.length()).toInt();
 
@@ -120,6 +124,15 @@ void loop() {
             gWaveform = static_cast<oscType>(inputString.substring(2, inputString.length()).toInt());
         } else if (inputString[1] == 'C') { // duty cycle change command
             gDutyCycle = inputString.substring(2, inputString.length()).toInt();
+        } else if (inputString[1] == 'O') { // portamento change command
+            gPortamento = inputString.substring(2, inputString.length()).toInt();
+            if (gPortamento < 1) gPortamento = 1; // cannot be less than 1
+        } else if (inputString[1] == 'V') { // volume change command
+            gVolume = (float)(inputString.substring(2, inputString.length()).toInt()) / (float)(1000);
+            for (int i = 0; i < masterMix.oscillators.size(); i++) {
+                masterMix.oscillators[i]->toDelete = true; // delete all active oscillators
+            }
+            masterMix.oscillators.push_back(new Oscillator(triangle, 65, midiFrequencies[65], 1023, gVolume, 5000, 100, 0, 5000, 65, 0)); // trigger a non-sustained note to test the volume
         }
     }
 }
