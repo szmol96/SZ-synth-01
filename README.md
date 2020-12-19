@@ -15,7 +15,6 @@ The project is based on a cheap Pro Micro and a WeMos LoLin32 board.
 
 ## What are the possible future features? Things to be fixed?
 * Stereo sound output
-* Adjustable volume (that hard-clipping sounds really bad, trust me)
 * Pitch modulation
 * Portamento
 * Noise waveform (mainly for producing percussion sounds)
