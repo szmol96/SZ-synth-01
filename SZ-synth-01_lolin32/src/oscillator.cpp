@@ -47,6 +47,7 @@ Oscillator::Oscillator(oscType initType, unsigned char initNote, unsigned int in
 
     this->portamentoNote = initPortamentoNote;
     this->portamento = initPortamento;
+    this->portamentoPos = 0;
 }
 
 Oscillator::~Oscillator() {
@@ -65,6 +66,9 @@ Oscillator::~Oscillator() {
     delete &this->absoluteSustainLevel;
     delete &this->release;
     delete &this->ADSRState;
+    delete &this->portamentoNote;
+    delete &this->portamento;
+    delete &this->portamentoPos;
 }
 
 void Oscillator::update() {
@@ -73,7 +77,8 @@ void Oscillator::update() {
     if (phase > wavetableSize - 1) phase = phase - (float)(wavetableSize); // phase will wrap around the wavetable
 
     if (this->note != this->portamentoNote && this->portamento > 1 && this->frequency != midiFrequencies[this->note]) {
-        this->frequency = this->frequency + ((float)midiFrequencies[this->note] - (float)midiFrequencies[this->portamentoNote]) / (float)(this->portamento); // slide from the starting frequency to the target frequency
+        this->portamentoPos = this->portamentoPos + 1;
+        this->frequency = map(this->portamentoPos, 0, this->portamento, midiFrequencies[this->portamentoNote], midiFrequencies[this->note]); // slide from the starting frequency to the target frequency
     }
 
     if (this->ADSRState == 0) { // attack state

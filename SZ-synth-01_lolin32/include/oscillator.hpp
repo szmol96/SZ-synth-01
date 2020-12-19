@@ -1,3 +1,4 @@
+#include <Arduino.h>
 #include <vector>
 #include "wavetables.hpp"
 
@@ -25,6 +26,7 @@ public:
 
     unsigned char portamentoNote; // the note to slide to the current note from
     unsigned int portamento; // the amount of portamento (the time it takes to slide from one note to another)
+    unsigned int portamentoPos;
 
     Oscillator(oscType initType, unsigned char initNote, unsigned int initFreq, unsigned int initDC, float initAmplitudeMax, unsigned int initAttack, unsigned int initDecay, float initSustainLevel, unsigned int initRelease, unsigned char initPortamentoNote, unsigned int initPortamento);
     ~Oscillator();
