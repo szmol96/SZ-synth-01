@@ -11,12 +11,12 @@ The project is based on a cheap Pro Micro and a WeMos LoLin32 board.
   * Adjustable duty cycle for the pulse waveform
 * Adjustable attack, decay, sustain level, and release
   * Skipping the decay and sustain phases when sustain is zero
-* Pitch bending (one semitone range)
+* Pitch bending (one semitone range
+* Portamento (although it doesn't work well with pitch bending yet)
 
 ## What are the possible future features? Things to be fixed?
 * Stereo sound output
 * Pitch modulation
-* Portamento
 * Noise waveform (mainly for producing percussion sounds)
 * Being able to produce more complex waveforms (modulating one wave by another, filters and stuff?)
 * Getting rid of the crackling that occurs sometimes on note triggers
