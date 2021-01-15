@@ -34,5 +34,6 @@ The project is based on a cheap Pro Micro and a WeMos LoLin32 board.
 * 2 x 2-axis analog sticks (for pitch bending, modulation and stuff; can be replaced with more potentiometers)
 * 1 x female Micro USB breakout board
 * 2 x Micro USB data cables (they will be cut to short pieces, you can get away with cheaper ones)
+* possibly lots of (insulated) wire to connect things together
 * an enclosure that will best fit your design
 * the source code for both development boards, of course!
