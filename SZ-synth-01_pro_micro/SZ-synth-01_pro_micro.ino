@@ -1,9 +1,16 @@
 #include <Wire.h>
 #include "Adafruit_MCP23017.h"
 #include "MIDIUSB.h"
+#include <Adafruit_GFX.h>
+#include <Adafruit_SSD1306.h>
+
 
 #define midiSwitch 7
 #define envelopeButton 5
+#define upButton 25
+#define rightButton 26
+#define downButton 27
+#define leftButton 28
 #define pitchAxis A0
 #define octaveAxis A1
 #define modulationAxis A2
@@ -17,19 +24,28 @@
 Adafruit_MCP23017 mcp0; // Address 000
 Adafruit_MCP23017 mcp1; // Address 001
 
+#define SCREEN_WIDTH 128
+#define SCREEN_HEIGHT 64
+
+#define OLED_RESET -1
+Adafruit_SSD1306 display(SCREEN_WIDTH, SCREEN_HEIGHT, &Wire, OLED_RESET);
+
+const String waveformNames[5] = {"sine", "triangle", "sawtooth", "square", "noise"};
+const String itemNames[4] = {"Waveform: ", "Octave: ", "Portamento: ", "Volume: "};
+
+unsigned int itemValues[4] = {0, 4, 0, 240};
+
 bool keyStates[25];
 bool canSwitchOctave;
 bool octaveKeyHeld = true;
-unsigned long octaveMillis = 0;
-bool volumeChange = false;
-bool portamentoChange = false;
 bool breathKeyHeld = false;
 bool envelopeKeyHeld = false;
-byte currentOctave = 4;
-byte previousOctave = 4;
-unsigned int currentVolume = 240; // this will be divided by 1000 in the ESP32 code, as the maximum amplitude is 1.0
-unsigned int currentPortamento = 0;
-byte currentWaveform = 0;
+bool directionButtonHeld = false;
+//byte currentOctave = 4;
+//unsigned int currentVolume = 240; // this will be divided by 1000 in the ESP32 code, as the maximum amplitude is 1.0
+//unsigned int currentPortamento = 0;
+//byte currentWaveform = 0;
+byte selectedItem = 0; // the current selection in the "menu"
 
 
 uint8_t expDigitalRead(uint8_t pin) { // digitalRead from expansion ICs
@@ -38,6 +54,25 @@ uint8_t expDigitalRead(uint8_t pin) { // digitalRead from expansion ICs
   } else if (pin < 32) {
     return mcp1.digitalRead(pin - 16);
   }
+}
+
+void drawDisplayContents() {
+  display.clearDisplay();
+
+  for (byte i = 0; i < 4; i++) {
+    display.setCursor(8, 8 + i * 8);
+
+    if (selectedItem == i) { // highlight the currently selected item
+      display.setTextColor(SSD1306_BLACK, SSD1306_WHITE);
+    } else { // draw other items as normal
+      display.setTextColor(SSD1306_WHITE, SSD1306_BLACK);
+    }
+
+    if (i != 0) display.print(itemNames[i] + String(itemValues[i]));
+    else display.print(itemNames[0] + waveformNames[itemValues[0]]);
+  }
+
+  display.display();
 }
 
 void serialNoteOn(byte noteNum) { // sends a message to the ESP32 to create an instance of the Oscillator class
@@ -162,6 +197,9 @@ void setup() {
   mcp0.begin(0, &Wire);
   mcp1.begin(1, &Wire);
 
+  display.begin(SSD1306_SWITCHCAPVCC, 0x3C);
+  drawDisplayContents();
+
   Serial1.begin(115200);
 
   delay(1000);
@@ -201,12 +239,12 @@ void loop() {
     for (int i = 0; i < 25; i++) {
       if (expDigitalRead(i) == LOW) {
         if (keyStates[i] == false) {
-          midiNoteOn(0, currentOctave * 12 + i, 64);
+          midiNoteOn(0, itemValues[1] * 12 + i, 64);
           keyStates[i] = true;
         }
       } else {
         if (keyStates[i] == true) {
-          midiNoteOff(0, currentOctave * 12 + i, 64);
+          midiNoteOff(0, itemValues[1] * 12 + i, 64);
           keyStates[i] = false;
         }
       }
@@ -217,37 +255,77 @@ void loop() {
 
     MidiUSB.flush();
   } else { // if the mode is set to synth mode (ESP32)
-    if (!volumeChange && !portamentoChange) {
-      for (int i = 0; i < 25; i++) { // handling key presses and releases here (note on/off)
-        if (expDigitalRead(i) == LOW) {
-          if (keyStates[i] == false) {
-            serialNoteOn(currentOctave * 12 + i);
-            keyStates[i] = true;
-          }
-        } else {
-          if (keyStates[i] == true) {
-            serialNoteOff(currentOctave * 12 + i);
-            keyStates[i] = false;
-          }
+    for (int i = 0; i < 25; i++) { // handling key presses and releases here (note on/off)
+      if (expDigitalRead(i) == LOW) {
+        if (keyStates[i] == false) {
+          serialNoteOn(itemValues[1] * 12 + i);
+          keyStates[i] = true;
+        }
+      } else {
+        if (keyStates[i] == true) {
+          serialNoteOff(itemValues[1] * 12 + i);
+          keyStates[i] = false;
         }
       }
-
-      if (pitchValue < 488 || pitchValue > 536) {
-        serialPitchChange(pitchValue - 512);
-        delay(2);
-      }
-
-      if (breathValue < 256 && !breathKeyHeld && currentWaveform > 0) {
-        currentWaveform--;
-        serialWaveformChange(currentWaveform);
-      }
-      if (breathValue > 768 && !breathKeyHeld && currentWaveform < 3) {
-        currentWaveform++;
-        serialWaveformChange(currentWaveform);
-      }
-
-      if (!digitalRead(envelopeButton) && !envelopeKeyHeld) serialSendADSR(); // ADSR and duty cycle settings will be sent only on button press to relieve the CPU from unnecessary analogRead calls
     }
+
+    if (pitchValue < 488 || pitchValue > 536) {
+      serialPitchChange(pitchValue - 512);
+      delay(2);
+    }
+
+    if (breathValue < 256 && !breathKeyHeld && itemValues[0] > 0) {
+      itemValues[0] = itemValues[0] - 1;
+      serialWaveformChange(itemValues[0]);
+      drawDisplayContents();
+    }
+    if (breathValue > 768 && !breathKeyHeld && itemValues[0] < 4) {
+      itemValues[0] = itemValues[0] + 1;
+      serialWaveformChange(itemValues[0]);
+      drawDisplayContents();
+    }
+
+    if (!digitalRead(envelopeButton) && !envelopeKeyHeld) serialSendADSR(); // ADSR and duty cycle settings will be sent only on button press to relieve the CPU from unnecessary analogRead calls
+  }
+
+  /*mode-unrelated stuff below*/
+
+  if (!expDigitalRead(upButton) && selectedItem > 0 && !directionButtonHeld) {
+    selectedItem--;
+    drawDisplayContents();
+  }
+  if (!expDigitalRead(downButton) && selectedItem < 3 && !directionButtonHeld) {
+    selectedItem++;
+    drawDisplayContents();
+  }
+
+  if (!expDigitalRead(leftButton) && !directionButtonHeld) {
+    if (selectedItem == 0 && itemValues[0] > 0) itemValues[0] -= 1;
+    if (selectedItem == 1 && itemValues[1] > 0) itemValues[1] -= 1;
+    if (selectedItem == 2 && itemValues[2] >= 100) {
+      itemValues[2] -= 100;
+      serialPortamentoChange(itemValues[2]);
+    }
+    if (selectedItem == 3 && itemValues[3] >= 20) {
+      itemValues[3] -= 20;
+      serialVolumeChange(itemValues[3]);
+    }
+
+    drawDisplayContents();
+  }
+  if (!expDigitalRead(rightButton) && !directionButtonHeld) {
+    if (selectedItem == 0 && itemValues[0] < 4) itemValues[0] += 1;
+    if (selectedItem == 1 && itemValues[1] < 7) itemValues[1] += 1;
+    if (selectedItem == 2 && itemValues[2] <= 19900) {
+      itemValues[2] += 100;
+      serialPortamentoChange(itemValues[2]);
+    }
+    if (selectedItem == 3 && itemValues[3] <= 220) {
+      itemValues[3] += 20;
+      serialVolumeChange(itemValues[3]);
+    }
+
+    drawDisplayContents();
   }
 
   if (octaveValue < 256) { // right stick is moved to the far left
@@ -261,36 +339,12 @@ void loop() {
         }
       }
 
-      if (canSwitchOctave && currentOctave > 0) {
-        previousOctave = currentOctave; // the currently selected octave gets saved into another variable
-        currentOctave--;
-        octaveMillis = currentMillis;
-      }
-    } else if (currentMillis - octaveMillis > 1000) { // if the octave stick is pushed to the left for more than one second
-      currentOctave = previousOctave; // the selected octave gets reverted back to the previous one
-      portamentoChange = true;
-
-      if (expDigitalRead(0) == LOW && currentPortamento >= 100) { // decreasing portamento
-        if (keyStates[0] == false) {
-          currentPortamento -= 100;
-          serialPortamentoChange(currentPortamento);
-          keyStates[0] = true;
-        }
-      } else {
-        if (keyStates[0] == true) keyStates[0] = false;
-      }
-
-      if (expDigitalRead(2) == LOW) { // increasing portamento
-        if (keyStates[2] == false) {
-          currentPortamento += 100;
-          serialPortamentoChange(currentPortamento);
-          keyStates[2] = true;
-        }
-      } else {
-        if (keyStates[2] == true) keyStates[2] = false;
+      if (canSwitchOctave && itemValues[1] > 0) {
+        itemValues[1] = itemValues[1] - 1;
+        drawDisplayContents();
       }
     }
-  } else portamentoChange = false;
+  }
   if (octaveValue > 768) { // right stick is moved to the far right
     if (!octaveKeyHeld) { // execute this only once until the stick is moved back to the middle
       canSwitchOctave = true;
@@ -302,38 +356,15 @@ void loop() {
         }
       }
 
-      if (canSwitchOctave && currentOctave < 7) {
-        previousOctave = currentOctave; // the currently selected octave gets saved into another variable
-        currentOctave++;
-        octaveMillis = currentMillis;
-      }
-    } else if (currentMillis - octaveMillis > 1000) { // if the octave stick is pushed to the left for more than one second
-      currentOctave = previousOctave; // the selected octave gets reverted back to the previous one
-      volumeChange = true;
-
-      if (expDigitalRead(0) == LOW && currentVolume >= 20) { // decreasing volume
-        if (keyStates[0] == false) {
-          currentVolume -= 20;
-          serialVolumeChange(currentVolume);
-          keyStates[0] = true;
-        }
-      } else {
-        if (keyStates[0] == true) keyStates[0] = false;
-      }
-
-      if (expDigitalRead(2) == LOW && currentVolume < 1000) { // increasing volume
-        if (keyStates[2] == false) {
-          currentVolume += 20;
-          serialVolumeChange(currentVolume);
-          keyStates[2] = true;
-        }
-      } else {
-        if (keyStates[2] == true) keyStates[2] = false;
+      if (canSwitchOctave && itemValues[1] < 7) {
+        itemValues[1] = itemValues[1] + 1;
+        drawDisplayContents();
       }
     }
-  } else volumeChange = false;
+  }
 
   octaveKeyHeld = (octaveValue < 256) || (octaveValue > 768);
   breathKeyHeld = (breathValue < 256) || (breathValue > 768);
   envelopeKeyHeld = !digitalRead(envelopeButton);
+  directionButtonHeld = !expDigitalRead(upButton) || !expDigitalRead(rightButton) || !expDigitalRead(downButton) || !expDigitalRead(leftButton);
 }

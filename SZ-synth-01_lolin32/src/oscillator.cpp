@@ -3,7 +3,7 @@
 Oscillator::Oscillator(oscType initType, unsigned char initNote, unsigned int initFreq, unsigned int initDC, float initAmplitudeMax, unsigned int initAttack, unsigned int initDecay, float initSustainLevel, unsigned int initRelease, unsigned char initPortamentoNote, unsigned int initPortamento) {
     this->toDelete = false;
     
-    if (initType < sine || initType > square) this->type = sine; // max. is 3 for now, will be 4 later (when the noise waveform is added)
+    if (initType < sine || initType > noise) this->type = sine; // max. is 3 for now, will be 4 later (when the noise waveform is added)
     else this->type = initType;
 
     this->note = initNote; // needed for handling note off commands
@@ -72,9 +72,18 @@ Oscillator::~Oscillator() {
 }
 
 void Oscillator::update() {
-    this->increment = (float)(frequency) * (float)(wavetableSize) / (float)(44100);
-    this->phase = phase + increment;
-    if (phase > wavetableSize - 1) phase = phase - (float)(wavetableSize); // phase will wrap around the wavetable
+    if (this->type != noise) {
+        this->increment = (float)(frequency) * (float)(wavetableSize) / (float)(44100);
+        this->phase = phase + increment;
+        if (phase > wavetableSize - 1) phase = phase - (float)(wavetableSize); // phase will wrap around the wavetable
+    } else {
+        this->increment = (float)(frequency * 2) * (float)(noiseLength) / (float)(22050);
+        this->phase = phase + increment;
+        if (phase > noiseLength - 1) {
+            this->phase = this->phase - (float)(noiseLength);
+            this->dutyCycle = random(0, 65535); // depending on frequency, a new sample is randomly generated instead of using lookup-tables
+        }
+    }
 
     if (this->note != this->portamentoNote && this->portamento > 1 && this->frequency != midiFrequencies[this->note]) {
         this->portamentoPos = this->portamentoPos + 1;
@@ -121,7 +130,8 @@ void Mixer::doYourMagic() {
         if (this->oscillators[i]->type == square) { // the square waveform needs special treatment because of duty cycle and also it's not retrieved from lookup-tables
             this->mixedSample = this->mixedSample + (unsigned int)(((unsigned int)(oscillators[i]->phase + 0.5) > this->oscillators[i]->dutyCycle) ? 0 : 65535 * this->oscillators[i]->amplitude);
         } else {
-            this->mixedSample = this->mixedSample + (unsigned int)((float)(wavetables[this->oscillators[i]->type][(unsigned int)(oscillators[i]->phase + 0.5)]) * this->oscillators[i]->amplitude); // get the wave sample from the wavetables depending on waveform and phase, then add it to the output sample
+            if (this->oscillators[i]->type != noise) this->mixedSample = this->mixedSample + (unsigned int)((float)(wavetables[this->oscillators[i]->type][(unsigned int)(oscillators[i]->phase + 0.5)]) * this->oscillators[i]->amplitude); // get the wave sample from the wavetables depending on waveform and phase, then add it to the output sample
+            else this->mixedSample = this->mixedSample + (unsigned int)((float)(this->oscillators[i]->dutyCycle) * this->oscillators[i]->amplitude); // square wave breaks the indexing order of the wavetable array, so noise waveform needs another if statement
         }
 
         if (this->oscillators[i]->toDelete == true) {

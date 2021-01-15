@@ -10,7 +10,7 @@ public:
     oscType type;
     unsigned char note; // needed for knowing which key triggered the oscillator
     float frequency; // the frequency the waveform is played at
-    unsigned int dutyCycle; // what it says on the tin, only important for the square waveform
+    unsigned int dutyCycle; // what it says on the tin, only important for the square waveform (and for noise; random value gets stored here)
     float amplitudeMax; // the maximum amplitude the oscillator can reach (ranging from 0 to 1)
     float amplitude; // the amplitude the waveform is currently played at (aka. volume) (ranging from 0 to amplitudeMax) (ADSR)
     float phase; // an index for the waveform array for deciding which sample to write to buffer

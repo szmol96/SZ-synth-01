@@ -79,6 +79,8 @@ void setup() {
     i2s_set_dac_mode(I2S_DAC_CHANNEL_DISABLE); // disable output to internal DACs
 
     xTaskCreatePinnedToCore(runMixer, "Mixer", 10000, NULL, 1, &mixerHandle, 0);
+
+    randomSeed(5);
 }
 
 void loop() {
